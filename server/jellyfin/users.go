@@ -37,6 +37,18 @@ func (api *Router) getCurrentUser(w http.ResponseWriter, r *http.Request) {
 	api.ok(w, r, userToDto(&u, serverName(), api.serverID(ctx)))
 }
 
+// getUsers serves both sides of the Jellyfin user-list contract without exposing
+// Navidrome's full user table. Before login it keeps the configured public-user
+// allowlist; after login it returns the authenticated user's complete DTO, which
+// SenPlayer requests while restoring a saved server connection.
+func (api *Router) getUsers(w http.ResponseWriter, r *http.Request) {
+	if usr, ok := api.userFromToken(r); ok {
+		api.ok(w, r, []dto.UserDto{*userToDto(&usr, serverName(), api.serverID(r.Context()))})
+		return
+	}
+	api.getPublicUsers(w, r)
+}
+
 // getPublicUsers advertises the users named in Jellyfin.ExposedPublicUsers for a client login
 // picker. The route is unauthenticated, so it lists only the configured allowlist (never the full
 // user table) and returns a minimal DTO — no Policy/Configuration, which would leak admin status.

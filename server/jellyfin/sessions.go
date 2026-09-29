@@ -19,6 +19,13 @@ type playbackReport struct {
 	IsPaused      bool   `json:"IsPaused"`
 }
 
+// getSessions answers the read-only session poll used by SenPlayer. Navidrome's
+// playback tracker is intentionally private to the caller and does not expose a
+// Jellyfin session list, so an empty array is the truthful, schema-compatible result.
+func (api *Router) getSessions(w http.ResponseWriter, r *http.Request) {
+	api.ok(w, r, []dto.SessionInfo{})
+}
+
 // decodeReport reads the playback report body. ItemId falls back to a query param (some clients send
 // it there) and is decoded here since it flows straight into scrobbler lookups by media file id.
 // These endpoints always answer 204 (see reportPlaybackStart), so a malformed id isn't a request

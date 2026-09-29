@@ -89,6 +89,12 @@ func (api *Router) routes() http.Handler {
 	// Not rate-limited: Finamp and Streamyfin poll it every second while the code is shown.
 	inner.With(requireQuickConnect).Get("/quickconnect/connect", api.quickConnectConnect)
 	inner.Get("/users/public", api.getPublicUsers)
+	// SenPlayer probes these optional discovery endpoints before/after login. Keep the
+	// responses deliberately empty: Navidrome does not expose server domains or other
+	// users through this compatibility API, but valid empty Jellyfin responses let the
+	// client continue its connection flow.
+	inner.Get("/users", api.getUsers)
+	inner.Get("/system/ext/serverdomains", api.getServerDomains)
 
 	// Images are intentionally public: artwork isn't sensitive, matching Jellyfin's image handling.
 	// Bound concurrency like Subsonic's getCoverArt: image decode/resize is CPU- and memory-heavy,
@@ -114,6 +120,9 @@ func (api *Router) routes() http.Handler {
 		r.Get("/users/{userId}/views", api.getUserViews)
 		r.Get("/users/me", api.getCurrentUser)
 		r.Get("/users/{userId}", api.getCurrentUser)
+		// SenPlayer polls the active-session list. Playback reporting remains the
+		// source of truth; this endpoint intentionally returns an empty list.
+		r.Get("/sessions", api.getSessions)
 		// Throttled like login so a signed-in user cannot enumerate other people's pending codes.
 		approve := r.With(requireQuickConnect)
 		if conf.Server.AuthRequestLimit > 0 {

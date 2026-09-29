@@ -135,7 +135,12 @@ func startServer(ctx context.Context) func() error {
 			a.MountRouter("ListenBrainz Auth", consts.URLPathNativeAPI+"/listenbrainz", CreateListenBrainzRouter())
 		}
 		if conf.Server.Jellyfin.Enabled {
-			a.MountRouter("Jellyfin API", consts.URLPathJellyfinAPI, CreateJellyfinAPIRouter(ctx))
+			jellyfinRouter := CreateJellyfinAPIRouter(ctx)
+			a.MountRouterWithRootPrefixes("Jellyfin API", consts.URLPathJellyfinAPI, jellyfinRouter,
+				jellyfinRootCompatibilityPrefixes...)
+			// SenPlayer and other Emby-compatible clients commonly default to /emby.
+			// Keep /jellyfin as the canonical route and serve both from the same handler.
+			a.MountRouter("Emby-compatible Jellyfin API", "/emby", jellyfinRouter)
 		}
 		if conf.Server.DevAPIv1 {
 			a.MountRouter("API v1", consts.URLPathAPIv1, CreateAPIv1Router(ctx))
@@ -154,6 +159,33 @@ func startServer(ctx context.Context) func() error {
 		}
 		return a.Run(ctx, conf.Server.Address, conf.Server.Port, conf.Server.TLSCert, conf.Server.TLSKey)
 	}
+}
+
+// jellyfinRootCompatibilityPrefixes are the Jellyfin resource prefixes used by
+// SenPlayer during connection, library browsing, artwork lookup and playback.
+// They are intentionally explicit: only these paths may bypass /jellyfin or /emby.
+var jellyfinRootCompatibilityPrefixes = []string{
+	"system",
+	"users",
+	"quickconnect",
+	"items",
+	"audio",
+	"artists",
+	"albums",
+	"genres",
+	"musicgenres",
+	"studios",
+	"songs",
+	"playlists",
+	"userviews",
+	"useritems",
+	"userfavoriteitems",
+	"sessions",
+	"socket",
+	"audiomuseai",
+	"videos",
+	"shows",
+	"episodes",
 }
 
 // profilerHandler returns the pprof handler. net/http/pprof resolves the profile

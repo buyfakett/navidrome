@@ -52,6 +52,36 @@ var _ = Describe("AuthenticateByName", func() {
 		Expect(res.User.Configuration).ToNot(BeNil())
 	})
 
+	It("accepts Password as a fallback for the Emby-compatible spelling", func() {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/Users/AuthenticateByName",
+			strings.NewReader(`{"username":"alice","password":"secret"}`))
+		api.authenticateByName(w, r)
+
+		Expect(w.Code).To(Equal(http.StatusOK))
+		var res dto.AuthenticationResult
+		Expect(json.Unmarshal(w.Body.Bytes(), &res)).To(Succeed())
+		Expect(res.AccessToken).ToNot(BeEmpty())
+	})
+
+	It("uses Password when Pw is explicitly empty", func() {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/Users/AuthenticateByName",
+			strings.NewReader(`{"Username":"alice","Pw":"","Password":"secret"}`))
+		api.authenticateByName(w, r)
+
+		Expect(w.Code).To(Equal(http.StatusOK))
+	})
+
+	It("gives a non-empty Pw precedence over Password", func() {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/Users/AuthenticateByName",
+			strings.NewReader(`{"Username":"alice","Pw":"wrong","Password":"secret"}`))
+		api.authenticateByName(w, r)
+
+		Expect(w.Code).To(Equal(http.StatusUnauthorized))
+	})
+
 	Describe("SessionInfo", func() {
 		login := func(authHeader string) map[string]any {
 			w := httptest.NewRecorder()
@@ -146,6 +176,14 @@ var _ = Describe("AuthenticateByName", func() {
 			strings.NewReader(`{"Username":"empty","Pw":""}`))
 		api.authenticateByName(w, r)
 		Expect(w.Code).To(Equal(http.StatusUnauthorized))
+	})
+
+	It("rejects malformed JSON with 400", func() {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/Users/AuthenticateByName", strings.NewReader(`{"Username":"alice"`))
+		api.authenticateByName(w, r)
+
+		Expect(w.Code).To(Equal(http.StatusBadRequest))
 	})
 })
 

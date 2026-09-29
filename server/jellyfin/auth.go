@@ -12,7 +12,11 @@ import (
 
 type authenticateByNameRequest struct {
 	Username string `json:"Username"`
+	// Jellyfin documents Pw, while Emby-compatible clients (including SenPlayer)
+	// may send Password instead. encoding/json matches these keys case-insensitively,
+	// so lower-case/camel-case variants are accepted as well.
 	Pw       string `json:"Pw"`
+	Password string `json:"Password"`
 }
 
 func (api *Router) authenticateByName(w http.ResponseWriter, r *http.Request) {
@@ -23,9 +27,17 @@ func (api *Router) authenticateByName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prefer the Jellyfin spelling when it is non-empty, but accept the Emby spelling as
+	// a fallback. A non-empty Pw must win over Password so a conflicting pair cannot
+	// turn a failed Pw into a successful login.
+	password := body.Pw
+	if password == "" {
+		password = body.Password
+	}
+
 	// Navidrome stores recoverable passwords; this mirrors Subsonic's validateCredentials plaintext path.
 	usr, err := api.ds.User().FindByUsernameWithPassword(ctx, body.Username)
-	if body.Pw == "" || err != nil || usr == nil || usr.Password != body.Pw {
+	if password == "" || err != nil || usr == nil || usr.Password != password {
 		log.Warn(ctx, "Jellyfin API: invalid login", "username", body.Username, "remoteAddr", r.RemoteAddr)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return

@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/navidrome/navidrome/core/auth"
 	"github.com/navidrome/navidrome/core/quickconnect"
 	"github.com/navidrome/navidrome/model"
+	"github.com/navidrome/navidrome/server/jellyfin/dto"
 	"github.com/navidrome/navidrome/tests"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -32,6 +34,41 @@ var _ = Describe("Router", func() {
 		r := httptest.NewRequest("GET", "/System/Info/Public", nil)
 		api.ServeHTTP(w, r)
 		Expect(w.Code).To(Equal(http.StatusOK))
+	})
+
+	It("serves SenPlayer's optional public discovery probes", func() {
+		api := New(&tests.MockDataStore{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+		for _, endpoint := range []string{"/Users", "/System/Ext/ServerDomains"} {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, endpoint, nil)
+			api.ServeHTTP(w, r)
+
+			Expect(w.Code).To(Equal(http.StatusOK), endpoint)
+			Expect(w.Body.String()).To(Equal("[]\n"), endpoint)
+		}
+	})
+
+	It("returns the authenticated user from the post-login user list", func() {
+		ds := &tests.MockDataStore{}
+		auth.Init(ds)
+		usr := model.User{ID: testID("u1"), UserName: "alice", NewPassword: "secret"}
+		Expect(ds.User().Put(ctx, &usr)).To(Succeed())
+		token, err := auth.CreateAPIToken(&usr, auth.AudienceJellyfin)
+		Expect(err).ToNot(HaveOccurred())
+		api := New(ds, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/Users", nil)
+		r.Header.Set("X-Emby-Token", token)
+		api.ServeHTTP(w, r)
+
+		Expect(w.Code).To(Equal(http.StatusOK))
+		var users []dto.UserDto
+		Expect(json.Unmarshal(w.Body.Bytes(), &users)).To(Succeed())
+		Expect(users).To(HaveLen(1))
+		Expect(users[0].Name).To(Equal("alice"))
+		Expect(users[0].Policy).ToNot(BeNil())
 	})
 
 	It("returns 404 JSON for unknown routes", func() {

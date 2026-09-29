@@ -53,6 +53,13 @@ All the paths below are relative to that base URL (e.g. `System/Info/Public` mea
 `http://localhost:4533/jellyfin/System/Info/Public`). Routes are matched **case-insensitively**,
 since real Jellyfin clients (and `jellyfin-apiclient-python`) send mixed-case paths.
 
+For Emby-compatible clients that choose a legacy base path, the same API is also available under
+`/emby`. SenPlayer versions that omit both prefixes are supported for the Jellyfin resource paths
+they use (for example `/Users/AuthenticateByName`, `/System/Info/Public`, `/Items` and
+`/Audio/{id}/stream`). These root aliases are selective, so the existing `/app`, `/api` and `/rest`
+routes keep their normal behavior. `/jellyfin` remains the canonical URL and is the address
+reported in `LocalAddress`.
+
 ## Auto discovery
 
 With `AutoDiscovery = true`, Navidrome answers the Jellyfin LAN discovery broadcast
@@ -76,7 +83,9 @@ networking is not an option, leave discovery off. Keep UDP 7359 on the LAN: neve
 ## Authentication
 
 Jellyfin clients authenticate with `POST /Users/AuthenticateByName` using the user's Navidrome
-username/password, and get back an `AccessToken` (a Navidrome JWT). That token is then sent on
+username/password. Both Jellyfin's `Pw` field and the Emby/SenPlayer `Password` field are accepted
+(`Pw` wins when both are non-empty), and the response contains an `AccessToken` (a Navidrome JWT).
+That token is then sent on
 every subsequent request as the `X-Emby-Token` header (or embedded in the
 `X-Emby-Authorization`/`Authorization` header's `Token="..."` field, or as an `api_key`/`ApiKey`
 query param — all forms are accepted, matching what different clients do).
@@ -168,9 +177,9 @@ returns direct children only (no tracks — no track is a library's direct child
 
 | Area | Endpoints |
 |---|---|
-| Handshake / system | `GET System/Info/Public`, `GET System/Info` (authenticated), `GET`/`POST System/Ping`, `GET System/Endpoint` (authenticated) |
+| Handshake / system | `GET System/Info/Public`, `GET System/Info` (authenticated), `GET`/`POST System/Ping`, `GET System/Endpoint` (authenticated), `GET System/Ext/ServerDomains` (empty compatibility response) |
 | Quick Connect | `GET QuickConnect/Enabled`, `POST QuickConnect/Initiate`, `GET QuickConnect/Connect`, `POST QuickConnect/Authorize` (authenticated), `POST Users/AuthenticateWithQuickConnect` |
-| Auth | `POST Users/AuthenticateByName`, `GET Users/Public` |
+| Auth | `POST Users/AuthenticateByName`, `GET Users`, `GET Users/Public` |
 | Users | `GET UserViews`, `GET Users/{userId}/Views`, `GET Users/Me`, `GET Users/{userId}` |
 | Browsing | `GET Items`, `GET Users/{userId}/Items`, `GET Items/{itemId}`, `GET Users/{userId}/Items/{itemId}`, `GET Items/Latest`, `GET Users/{userId}/Items/Latest`, `DELETE Items/{itemId}` (playlists only) |
 | Artists / genres / labels | `GET Artists`, `GET Artists/AlbumArtists`, `GET Genres`, `GET MusicGenres`, `GET Studios`, `GET Items/Filters` |
@@ -179,7 +188,7 @@ returns direct children only (no tracks — no track is a library's direct child
 | Favorites / ratings for songs, albums, artists, and playlists | `POST`/`DELETE UserFavoriteItems/{itemId}`, `POST`/`DELETE Users/{userId}/FavoriteItems/{itemId}`, `POST`/`DELETE Users/{userId}/Items/{itemId}/Rating`, `GET UserItems/{itemId}/UserData`, `GET Users/{userId}/Items/{itemId}/UserData` |
 | Streaming | `GET Audio/{itemId}/stream[.{container}]`, `GET Audio/{itemId}/universal`, `GET Audio/{itemId}/main.m3u8`, `GET Items/{itemId}/File`, `GET Items/{itemId}/Download`, `GET`/`POST Items/{itemId}/PlaybackInfo` (`HEAD` too on stream, universal, File, Download and images; a transcode HEAD answers without starting it) |
 | Lyrics | `GET Audio/{itemId}/Lyrics` |
-| Playback reporting | `POST Sessions/Playing`, `POST Sessions/Playing/Progress`, `POST Sessions/Playing/Stopped`, `POST Sessions/Playing/Ping` (no-op), `POST Sessions/Capabilities[/Full]` |
+| Playback reporting | `GET Sessions` (empty SenPlayer session poll), `POST Sessions/Playing`, `POST Sessions/Playing/Progress`, `POST Sessions/Playing/Stopped`, `POST Sessions/Playing/Ping` (no-op), `POST Sessions/Capabilities[/Full]` |
 | Playlists | `POST Playlists`, `GET Playlists/{playlistId}`, `POST Playlists/{playlistId}` (rename / visibility / replace tracks), `GET Playlists/{playlistId}/Items`, `POST`/`DELETE Playlists/{playlistId}/Items` (`POST` honors `position`), `POST Playlists/{playlistId}/Items/{entryId}/Move/{newIndex}`, `GET Playlists/{playlistId}/Users[/{userId}]` |
 | Real-time | `GET socket` (WebSocket; keeps clients like Finamp from 404-loop-reconnecting) |
 | AudioMuse-AI (see below) | `GET AudioMuseAI/info`, `GET AudioMuseAI/health`, `GET AudioMuseAI/similar_tracks`, `GET AudioMuseAI/find_path` |

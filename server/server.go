@@ -28,11 +28,21 @@ import (
 )
 
 type Server struct {
-	router   chi.Router
-	ds       model.DataStore
-	appRoot  string
-	broker   events.Broker
-	insights metrics.Insights
+	router           chi.Router
+	ds               model.DataStore
+	appRoot          string
+	broker           events.Broker
+	insights         metrics.Insights
+	rootCompatRoutes []rootCompatRoute
+}
+
+// rootCompatRoute describes a legacy API route that is reachable without the API's
+// normal mount prefix. Some clients (notably SenPlayer configured against an Emby
+// server) send /Users/... directly at the server root. Keep these aliases explicit
+// so unrelated root paths continue to be handled by the web UI or their own router.
+type rootCompatRoute struct {
+	handler  http.Handler
+	prefixes []string
 }
 
 func New(ds model.DataStore, broker events.Broker, insights metrics.Insights) *Server {
@@ -53,6 +63,30 @@ func (s *Server) MountRouter(description, urlPath string, subRouter http.Handler
 	s.router.Group(func(r chi.Router) {
 		r.Mount(urlPath, subRouter)
 	})
+}
+
+// MountRouterWithRootPrefixes mounts a router at its normal URL path and exposes a
+// deliberately small set of that router's paths at the configured BasePath root.
+//
+// The root aliases exist for clients that omit /jellyfin or /emby from their base
+// URL. prefixes are path segments such as "users" or "items"; matching is
+// case-insensitive and requires a segment boundary. The dispatched request is
+// cloned with BasePath removed and with a fresh chi routing context, so the mounted
+// router behaves exactly as it does under its regular mount point.
+func (s *Server) MountRouterWithRootPrefixes(description, urlPath string, subRouter http.Handler, prefixes ...string) {
+	s.MountRouter(description, urlPath, subRouter)
+
+	normalized := normalizeRootCompatPrefixes(prefixes)
+	if len(normalized) == 0 {
+		return
+	}
+
+	s.rootCompatRoutes = append(s.rootCompatRoutes, rootCompatRoute{
+		handler:  subRouter,
+		prefixes: normalized,
+	})
+	log.Info(fmt.Sprintf("Mounting %s root compatibility routes", description),
+		"prefixes", normalized)
 }
 
 // Run starts the server with the given address, and if specified, with TLS enabled.
@@ -223,13 +257,112 @@ func (s *Server) mountAuthenticationRoutes() chi.Router {
 // Serve UI app assets
 func (s *Server) mountRootRedirector() {
 	r := s.router
-	// Redirect root to UI URL
-	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, s.appRoot+"/", http.StatusFound)
-	})
+	// Redirect root to UI URL. This is an all-method wildcard because a few legacy
+	// clients send their API calls without /jellyfin or /emby; dispatchRootCompat
+	// gets first refusal for the explicitly supported API prefixes. Non-GET requests
+	// that do not match an alias retain the old wildcard's 405 response.
+	r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.dispatchRootCompat(w, r) {
+			return
+		}
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			http.Redirect(w, r, s.appRoot+"/", http.StatusFound)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
 	r.Get(s.appRoot, func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, s.appRoot+"/", http.StatusFound)
 	})
+}
+
+// dispatchRootCompat serves a request through a registered root alias. It returns
+// false when the request is outside BasePath or does not begin with one of the
+// explicitly registered prefixes.
+func (s *Server) dispatchRootCompat(w http.ResponseWriter, r *http.Request) bool {
+	relative, ok := stripBasePath(r.URL.Path, conf.Server.BasePath)
+	if !ok {
+		return false
+	}
+
+	for _, route := range s.rootCompatRoutes {
+		if !matchesRootCompatPrefix(relative, route.prefixes) {
+			continue
+		}
+
+		// The parent router has already populated chi.RouteCtxKey for its wildcard
+		// route. Store a typed nil there so the child chi mux creates a fresh context
+		// instead of reusing the parent's wildcard parameters and route path.
+		routed := r.Clone(context.WithValue(r.Context(), chi.RouteCtxKey, (*chi.Context)(nil)))
+		u := *r.URL
+		u.Path = relative
+		u.RawPath = ""
+		routed.URL = &u
+		routed.RequestURI = relative
+		if u.RawQuery != "" {
+			routed.RequestURI += "?" + u.RawQuery
+		}
+		routed.Pattern = ""
+		route.handler.ServeHTTP(w, routed)
+		return true
+	}
+
+	return false
+}
+
+func normalizeRootCompatPrefixes(prefixes []string) []string {
+	result := make([]string, 0, len(prefixes))
+	seen := make(map[string]struct{}, len(prefixes))
+	for _, prefix := range prefixes {
+		prefix = strings.TrimSpace(prefix)
+		prefix = strings.Trim(prefix, "/")
+		if prefix == "" {
+			continue
+		}
+		prefix = strings.ToLower(prefix)
+		if _, exists := seen[prefix]; exists {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		result = append(result, prefix)
+	}
+	return result
+}
+
+func matchesRootCompatPrefix(relative string, prefixes []string) bool {
+	relative = strings.ToLower(relative)
+	for _, prefix := range prefixes {
+		prefix = strings.ToLower(prefix)
+		if relative == "/"+prefix || strings.HasPrefix(relative, "/"+prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// stripBasePath removes the configured BasePath from a request path while
+// preserving a leading slash for the child router. It requires a segment boundary
+// so /musicbox cannot accidentally match a configured /music base path.
+func stripBasePath(requestPath, basePath string) (string, bool) {
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	basePath = strings.Trim(strings.TrimSpace(basePath), "/")
+	if basePath == "" {
+		return requestPath, strings.HasPrefix(requestPath, "/")
+	}
+	basePath = "/" + basePath
+	if requestPath == basePath {
+		return "/", true
+	}
+	if !strings.HasPrefix(requestPath, basePath+"/") {
+		return "", false
+	}
+	relative := strings.TrimPrefix(requestPath, basePath)
+	if relative == "" {
+		relative = "/"
+	}
+	return relative, true
 }
 
 func (s *Server) frontendAssetsHandler() http.Handler {

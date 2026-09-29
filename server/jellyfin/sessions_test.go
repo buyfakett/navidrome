@@ -68,6 +68,16 @@ var _ = Describe("Sessions", func() {
 		api = &Router{ds: &tests.MockDataStore{}, scrobbler: pt}
 	})
 
+	It("returns an empty session list for SenPlayer polling", func() {
+		w := httptest.NewRecorder()
+		r := authed(httptest.NewRequest(http.MethodGet, "/Sessions", nil))
+
+		api.getSessions(w, r)
+
+		Expect(w.Code).To(Equal(http.StatusOK))
+		Expect(w.Body.String()).To(Equal("[]\n"))
+	})
+
 	Describe("reportPlaybackStart", func() {
 		It("reports playback start with the item id and position", func() {
 			w := httptest.NewRecorder()

@@ -122,6 +122,13 @@ func (api *Router) getEndpointInfo(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// getServerDomains is a SenPlayer-specific discovery probe. Navidrome has no
+// alternate server domains to advertise, so return an empty JSON array rather than
+// making a compatible client fail on a 404.
+func (api *Router) getServerDomains(w http.ResponseWriter, r *http.Request) {
+	api.ok(w, r, []string{})
+}
+
 // isInLocalNetwork mirrors Jellyfin's default LAN set (NetworkManager.UpdateSettings with no
 // LocalNetworkSubnets configured): loopback, the RFC 1918 ranges, fc00::/7 and fe80::/10.
 func isInLocalNetwork(ip netip.Addr) bool {
